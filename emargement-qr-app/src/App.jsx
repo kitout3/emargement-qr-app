@@ -148,6 +148,8 @@ const App = () => {
 
   const startCamera = async () => {
     try {
+      setMessage('🎥 Chargement de la caméra...');
+      
       if (!html5QrCodeRef.current) {
         html5QrCodeRef.current = new Html5Qrcode(qrCodeRegionId);
       }
@@ -155,27 +157,41 @@ const App = () => {
       const config = {
         fps: 10,
         qrbox: { width: 250, height: 250 },
-        aspectRatio: 1.0
+        aspectRatio: 1.0,
+        rememberLastUsedCamera: true
       };
 
+      // Essayer d'abord la caméra arrière
+      const cameras = await Html5Qrcode.getCameras();
+      console.log('Caméras disponibles:', cameras);
+      
+      let cameraId = { facingMode: "environment" };
+      
+      // Si des caméras sont trouvées, utiliser la dernière (généralement caméra arrière)
+      if (cameras && cameras.length > 0) {
+        cameraId = cameras[cameras.length - 1].id;
+      }
+
       await html5QrCodeRef.current.start(
-        { facingMode: "environment" },
+        cameraId,
         config,
         (decodedText) => {
-          // QR Code scanné avec succès
+          console.log('QR détecté:', decodedText);
           handleScanSuccess(decodedText);
         },
         (errorMessage) => {
-          // Erreur de scan (normale, se produit constamment)
-          // On ne fait rien ici
+          // Erreur normale pendant le scan, on ne fait rien
         }
       );
 
       setScanning(true);
+      setMessage('');
+      console.log('Scanner démarré avec succès');
     } catch (err) {
-      console.error('Erreur caméra:', err);
-      setMessage('❌ Erreur: Impossible d\'accéder à la caméra. Autorisez l\'accès dans les paramètres.');
+      console.error('Erreur complète caméra:', err);
+      setMessage(`❌ Erreur caméra: ${err.message || 'Impossible d\'accéder à la caméra'}. Vérifiez les autorisations.`);
       playErrorSound();
+      setScanning(false);
     }
   };
 
@@ -372,7 +388,7 @@ const App = () => {
           <div className="flex items-center justify-between">
             <div>
               <h1 className="text-3xl font-bold text-indigo-900 mb-2">
-                📋 Émargement Événements
+                📋 Application d'Émargement
               </h1>
               <p className="text-gray-600">Gestion multi-événements avec persistance</p>
             </div>
@@ -656,15 +672,19 @@ const App = () => {
                     </div>
                   ) : (
                     <div>
-                      <div id={qrCodeRegionId} className="mb-4 rounded-lg overflow-hidden"></div>
+                      <div className="bg-gray-900 rounded-lg overflow-hidden mb-4">
+                        <div id={qrCodeRegionId} style={{ width: '100%' }}></div>
+                      </div>
                       <button
                         onClick={stopCamera}
                         className="w-full bg-red-600 text-white px-8 py-3 rounded-lg font-semibold hover:bg-red-700 transition-all"
                       >
                         Arrêter le scanner
                       </button>
-                      <div className="mt-4 bg-indigo-50 rounded-lg p-3 text-center text-indigo-800 text-sm">
-                        <p>🎥 Caméra active - Présentez le code QR devant la zone de scan</p>
+                      <div className="mt-4 bg-indigo-50 rounded-lg p-4 text-center">
+                        <p className="text-indigo-800 font-semibold mb-2">🎥 Scanner actif</p>
+                        <p className="text-sm text-indigo-700">Placez le QR code dans le carré de scan</p>
+                        <p className="text-xs text-gray-600 mt-2">Maintenez le QR à 15-20cm de la caméra</p>
                       </div>
                     </div>
                   )}
@@ -803,18 +823,18 @@ const App = () => {
                           }`}
                         >
                           <div className="flex items-start justify-between">
-                            <div className="flex-1">
+                            <div className="flex-1 min-w-0">
                               <div className="flex items-center gap-2 mb-2">
                                 {participant.present ? (
                                   <CheckCircle className="text-green-600 flex-shrink-0" size={20} />
                                 ) : (
                                   <XCircle className="text-gray-400 flex-shrink-0" size={20} />
                                 )}
-                                <p className="font-bold text-gray-900 text-lg">{participant.name}</p>
+                                <p className="font-bold text-gray-900 text-lg break-words">{participant.name}</p>
                               </div>
-                              <p className="text-sm text-gray-600 italic ml-7">{participant.email}</p>
+                              <p className="text-sm text-gray-600 italic ml-7 break-words">{participant.email}</p>
                               {participant.manager && participant.manager !== 'N/A' && (
-                                <p className="text-sm text-gray-600 ml-7 mt-1">👤 Gérant: {participant.manager}</p>
+                                <p className="text-sm text-gray-600 ml-7 mt-1 break-words">👤 Gérant: {participant.manager}</p>
                               )}
                               {participant.scannedAt && (
                                 <p className="text-xs text-green-700 ml-7 mt-2 font-semibold">
@@ -824,7 +844,7 @@ const App = () => {
                             </div>
                             <button
                               onClick={() => togglePresence(participant.id)}
-                              className={`px-4 py-2 rounded-lg font-semibold text-sm transition-all ${
+                              className={`ml-3 px-4 py-2 rounded-lg font-semibold text-sm transition-all flex-shrink-0 ${
                                 participant.present
                                   ? 'bg-red-100 text-red-700 hover:bg-red-200'
                                   : 'bg-indigo-600 text-white hover:bg-indigo-700'
