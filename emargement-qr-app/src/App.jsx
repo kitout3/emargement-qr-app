@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Camera, Upload, Download, CheckCircle, XCircle, Users, FileSpreadsheet, X, Search, Calendar, ArrowLeft, Plus, UserPlus } from 'lucide-react';
 import * as XLSX from 'xlsx';
+import { Html5Qrcode } from 'html5-qrcode';
 
 const App = () => {
   const [view, setView] = useState('events');
@@ -17,11 +18,9 @@ const App = () => {
   const [showAddManual, setShowAddManual] = useState(false);
   const [manualName, setManualName] = useState('');
   const [manualEmail, setManualEmail] = useState('');
-  const videoRef = useRef(null);
-  const streamRef = useRef(null);
   const fileInputRef = useRef(null);
-  const canvasRef = useRef(null);
-  const scanIntervalRef = useRef(null);
+  const html5QrCodeRef = useRef(null);
+  const qrCodeRegionId = "qr-reader";
 
   // Charger les événements depuis localStorage au démarrage
   useEffect(() => {
@@ -149,24 +148,30 @@ const App = () => {
 
   const startCamera = async () => {
     try {
-      const constraints = {
-        video: {
-          facingMode: { ideal: 'environment' },
-          width: { ideal: 1920 },
-          height: { ideal: 1080 }
-        }
+      if (!html5QrCodeRef.current) {
+        html5QrCodeRef.current = new Html5Qrcode(qrCodeRegionId);
+      }
+
+      const config = {
+        fps: 10,
+        qrbox: { width: 250, height: 250 },
+        aspectRatio: 1.0
       };
 
-      const stream = await navigator.mediaDevices.getUserMedia(constraints);
-      
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        streamRef.current = stream;
-        
-        await videoRef.current.play();
-        setScanning(true);
-        startQRScanning();
-      }
+      await html5QrCodeRef.current.start(
+        { facingMode: "environment" },
+        config,
+        (decodedText) => {
+          // QR Code scanné avec succès
+          handleScanSuccess(decodedText);
+        },
+        (errorMessage) => {
+          // Erreur de scan (normale, se produit constamment)
+          // On ne fait rien ici
+        }
+      );
+
+      setScanning(true);
     } catch (err) {
       console.error('Erreur caméra:', err);
       setMessage('❌ Erreur: Impossible d\'accéder à la caméra. Autorisez l\'accès dans les paramètres.');
@@ -174,55 +179,48 @@ const App = () => {
     }
   };
 
-  const stopCamera = () => {
-    if (scanIntervalRef.current) {
-      clearInterval(scanIntervalRef.current);
-      scanIntervalRef.current = null;
-    }
-
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach(track => track.stop());
-      streamRef.current = null;
-    }
-    
-    if (videoRef.current) {
-      videoRef.current.srcObject = null;
-    }
-    
-    setScanning(false);
-  };
-
-  const startQRScanning = () => {
-    // Simulation de scan pour la démo - Dans une vraie app, utilisez html5-qrcode
-    scanIntervalRef.current = setInterval(() => {
-      const notPresent = participants.filter(p => !p.present);
-      
-      if (notPresent.length > 0 && Math.random() > 0.95) {
-        const randomParticipant = notPresent[Math.floor(Math.random() * notPresent.length)];
-        handleScanSuccess(randomParticipant.id);
+  const stopCamera = async () => {
+    if (html5QrCodeRef.current && scanning) {
+      try {
+        await html5QrCodeRef.current.stop();
+        setScanning(false);
+      } catch (err) {
+        console.error('Erreur arrêt caméra:', err);
       }
-    }, 500);
+    }
   };
 
   const handleScanSuccess = (scannedId) => {
-    const participant = participants.find(p => p.id === scannedId);
+    // Extraire l'ID si le QR contient du JSON
+    let participantId = scannedId;
+    try {
+      const parsed = JSON.parse(scannedId);
+      if (parsed.id) {
+        participantId = parsed.id;
+      }
+    } catch (e) {
+      // Ce n'est pas du JSON, utiliser la valeur brute
+      participantId = scannedId.trim();
+    }
+
+    const participant = participants.find(p => p.id === participantId);
     
     if (!participant) {
-      setMessage('❌ Code QR non reconnu - Participant introuvable');
+      setMessage(`❌ Code QR non reconnu : ${participantId}`);
       playErrorSound();
-      setTimeout(() => setMessage(''), 3000);
+      setTimeout(() => setMessage(''), 4000);
       return;
     }
 
     if (participant.present) {
       setMessage(`⚠️ ${participant.name} a déjà été scanné !`);
       playErrorSound();
-      setTimeout(() => setMessage(''), 3000);
+      setTimeout(() => setMessage(''), 4000);
       return;
     }
 
     const updatedParticipants = participants.map(p => 
-      p.id === scannedId 
+      p.id === participantId 
         ? { ...p, present: true, scannedAt: new Date().toLocaleString('fr-FR') }
         : p
     );
@@ -343,14 +341,11 @@ const App = () => {
 
   useEffect(() => {
     return () => {
-      if (scanIntervalRef.current) {
-        clearInterval(scanIntervalRef.current);
-      }
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach(track => track.stop());
+      if (html5QrCodeRef.current && scanning) {
+        html5QrCodeRef.current.stop().catch(err => console.error(err));
       }
     };
-  }, []);
+  }, [scanning]);
 
   const presentCount = participants.filter(p => p.present).length;
   const totalCount = participants.length;
@@ -639,6 +634,7 @@ const App = () => {
                       <div className="bg-gray-100 rounded-lg p-12 mb-4">
                         <Camera size={64} className="mx-auto text-gray-400 mb-4" />
                         <p className="text-gray-600 mb-4">Positionnez le QR code devant la caméra</p>
+                        <p className="text-sm text-gray-500">Le scan se fait automatiquement</p>
                       </div>
                       <button
                         onClick={startCamera}
@@ -660,19 +656,7 @@ const App = () => {
                     </div>
                   ) : (
                     <div>
-                      <div className="bg-black rounded-lg overflow-hidden mb-4 relative">
-                        <video
-                          ref={videoRef}
-                          autoPlay
-                          playsInline
-                          muted
-                          className="w-full h-96 object-cover"
-                        />
-                        <canvas ref={canvasRef} className="hidden" />
-                        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                          <div className="w-64 h-64 border-4 border-indigo-500 rounded-lg shadow-lg"></div>
-                        </div>
-                      </div>
+                      <div id={qrCodeRegionId} className="mb-4 rounded-lg overflow-hidden"></div>
                       <button
                         onClick={stopCamera}
                         className="w-full bg-red-600 text-white px-8 py-3 rounded-lg font-semibold hover:bg-red-700 transition-all"
@@ -680,7 +664,7 @@ const App = () => {
                         Arrêter le scanner
                       </button>
                       <div className="mt-4 bg-indigo-50 rounded-lg p-3 text-center text-indigo-800 text-sm">
-                        <p>🎥 Caméra active - Présentez le code QR</p>
+                        <p>🎥 Caméra active - Présentez le code QR devant la zone de scan</p>
                       </div>
                     </div>
                   )}
