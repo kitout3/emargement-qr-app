@@ -17,36 +17,11 @@ const App = () => {
   const [showAddManual, setShowAddManual] = useState(false);
   const [manualName, setManualName] = useState('');
   const [manualEmail, setManualEmail] = useState('');
-  const [showQRFileInput, setShowQRFileInput] = useState(false);
   const fileInputRef = useRef(null);
   const qrFileInputRef = useRef(null);
   const html5QrCodeRef = useRef(null);
   const qrCodeRegionId = "qr-reader";
 
-  // Scanner un QR depuis une photo
-  const handleQRImageUpload = async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-
-    try {
-      setMessage('📸 Analyse de la photo en cours...');
-      
-      if (!html5QrCodeRef.current) {
-        html5QrCodeRef.current = new Html5Qrcode(qrCodeRegionId);
-      }
-
-      const result = await html5QrCodeRef.current.scanFile(file, false);
-      console.log('✅ QR trouvé:', result);
-      handleScanSuccess(result);
-    } catch (err) {
-      console.error('❌ Erreur scan image:', err);
-      setMessage('❌ Aucun QR code détecté dans cette photo.\n\nAssurez-vous que le QR code est bien visible et net.');
-      playErrorSound();
-      setTimeout(() => setMessage(''), 4000);
-    }
-  };
-
-  // Charger les événements depuis localStorage au démarrage
   useEffect(() => {
     const savedEvents = localStorage.getItem('emargement-events');
     if (savedEvents) {
@@ -58,14 +33,12 @@ const App = () => {
     }
   }, []);
 
-  // Sauvegarder les événements dans localStorage à chaque modification
   useEffect(() => {
     if (events.length > 0) {
       localStorage.setItem('emargement-events', JSON.stringify(events));
     }
   }, [events]);
 
-  // Sons de validation et erreur
   const playSuccessSound = () => {
     const audioContext = new (window.AudioContext || window.webkitAudioContext)();
     const oscillator = audioContext.createOscillator();
@@ -170,149 +143,29 @@ const App = () => {
     setMode('list');
   };
 
-  const startCamera = async () => {
+  const handleQRImageUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
     try {
-      setMessage('🎥 Initialisation de la caméra...');
-      
-      // Attendre que le DOM soit prêt
-      await new Promise(resolve => setTimeout(resolve, 200));
-      
-      // Vérifier si l'élément existe
-      const readerElement = document.getElementById(qrCodeRegionId);
-      if (!readerElement) {
-        throw new Error('Élément scanner non trouvé. Réessayez.');
-      }
-      
-      setScanning(true);
+      setMessage('📸 Analyse de la photo en cours...');
       
       if (!html5QrCodeRef.current) {
         html5QrCodeRef.current = new Html5Qrcode(qrCodeRegionId);
       }
 
-      const config = {
-        fps: 10,
-        qrbox: { width: 250, height: 250 },
-        aspectRatio: 1.0,
-        disableFlip: false
-      };
-
-      // Pour Safari iOS : Méthode simple et directe
-      const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
-      
-      if (isSafari) {
-        console.log('📱 Safari détecté - Utilisation méthode iOS');
-        
-        try {
-          // Sur Safari iOS, utiliser la méthode la plus simple
-          await html5QrCodeRef.current.start(
-            { facingMode: "environment" },
-            config,
-            (decodedText) => {
-              console.log('✅ QR détecté:', decodedText);
-              handleScanSuccess(decodedText);
-            }
-          );
-          
-          setMessage('');
-          console.log('✅ Scanner Safari démarré');
-          return;
-        } catch (safariError) {
-          console.warn('⚠️ Tentative Safari échouée:', safariError);
-          // Continuer avec les autres méthodes
-        }
-      }
-
-      // Méthodes pour autres navigateurs ou fallback Safari
-      try {
-        const cameras = await Html5Qrcode.getCameras();
-        console.log('✅ Caméras trouvées:', cameras);
-        
-        if (cameras && cameras.length > 0) {
-          let backCamera = cameras.find(cam => 
-            cam.label.toLowerCase().includes('back') || 
-            cam.label.toLowerCase().includes('rear') ||
-            cam.label.toLowerCase().includes('arrière')
-          );
-          
-          if (!backCamera && cameras.length > 1) {
-            backCamera = cameras[cameras.length - 1];
-          }
-          
-          const cameraToUse = backCamera || cameras[0];
-          console.log('📷 Utilisation de:', cameraToUse.label);
-          
-          await html5QrCodeRef.current.start(
-            cameraToUse.id,
-            config,
-            (decodedText) => {
-              console.log('✅ QR détecté:', decodedText);
-              handleScanSuccess(decodedText);
-            }
-          );
-          
-          setMessage('');
-          console.log('✅ Scanner démarré avec ID caméra');
-          return;
-        }
-      } catch (err) {
-        console.warn('⚠️ Méthode avec ID échouée:', err);
-      }
-
-      // Fallback final : n'importe quelle caméra
-      try {
-        await html5QrCodeRef.current.start(
-          { facingMode: "user" },
-          config,
-          (decodedText) => {
-            console.log('✅ QR détecté:', decodedText);
-            handleScanSuccess(decodedText);
-          }
-        );
-        
-        setMessage('');
-        console.log('✅ Scanner démarré (caméra frontale)');
-      } catch (finalError) {
-        throw finalError;
-      }
-      
+      const result = await html5QrCodeRef.current.scanFile(file, false);
+      console.log('✅ QR trouvé:', result);
+      handleScanSuccess(result);
     } catch (err) {
-      console.error('❌ Erreur complète:', err);
-      setScanning(false);
-      
-      let errorMsg = '';
-      
-      if (err.name === 'NotAllowedError') {
-        errorMsg = '🚫 Accès caméra refusé.\n\n1. Allez dans Réglages iPhone\n2. Safari → Caméra\n3. Autorisez l\'accès';
-      } else if (err.name === 'NotFoundError') {
-        errorMsg = '📷 Aucune caméra trouvée sur cet appareil.';
-      } else if (err.name === 'NotReadableError') {
-        errorMsg = '⚠️ Caméra déjà utilisée.\n\nFermez les autres apps et réessayez.';
-      } else if (err.name === 'OverconstrainedError') {
-        errorMsg = '⚠️ Configuration caméra invalide.\n\nVotre appareil ne supporte pas cette caméra.';
-      } else if (err.message && err.message.includes('scanner non trouvé')) {
-        errorMsg = '⚠️ Erreur de chargement.\n\nRevenez en arrière et réessayez.';
-      } else {
-        errorMsg = `❌ Erreur: ${err.message || 'Erreur inconnue'}\n\nRéessayez ou contactez le support.`;
-      }
-      
-      setMessage(errorMsg);
+      console.error('❌ Erreur scan image:', err);
+      setMessage('❌ Aucun QR code détecté dans cette photo.\n\nAssurez-vous que le QR code est bien visible et net.');
       playErrorSound();
-    }
-  };
-
-  const stopCamera = async () => {
-    if (html5QrCodeRef.current && scanning) {
-      try {
-        await html5QrCodeRef.current.stop();
-        setScanning(false);
-      } catch (err) {
-        console.error('Erreur arrêt caméra:', err);
-      }
+      setTimeout(() => setMessage(''), 4000);
     }
   };
 
   const handleScanSuccess = (scannedId) => {
-    // Extraire l'ID si le QR contient du JSON
     let participantId = scannedId;
     try {
       const parsed = JSON.parse(scannedId);
@@ -320,7 +173,6 @@ const App = () => {
         participantId = parsed.id;
       }
     } catch (e) {
-      // Ce n'est pas du JSON, utiliser la valeur brute
       participantId = scannedId.trim();
     }
 
@@ -517,7 +369,7 @@ const App = () => {
             message.includes('❌') || message.includes('⚠️') ? 'bg-red-50 text-red-800 border-2 border-red-200' :
             'bg-yellow-50 text-yellow-800 border-2 border-yellow-200'
           }`}>
-            <p className="font-semibold text-lg">{message}</p>
+            <p className="font-semibold text-lg whitespace-pre-line">{message}</p>
           </div>
         )}
 
@@ -752,7 +604,6 @@ const App = () => {
                       <p className="text-sm text-gray-600">Prenez une photo du code QR pour enregistrer la présence</p>
                     </div>
                     
-                    {/* BOUTON PRINCIPAL - Prendre photo et scanner */}
                     <input
                       ref={qrFileInputRef}
                       type="file"
@@ -771,14 +622,12 @@ const App = () => {
                     
                     <p className="text-sm text-gray-500 mb-6">Votre appareil photo va s'ouvrir automatiquement</p>
                     
-                    {/* Séparateur */}
                     <div className="flex items-center gap-4 mb-6">
                       <div className="flex-1 border-t border-gray-300"></div>
                       <span className="text-gray-500 text-sm">ou</span>
                       <div className="flex-1 border-t border-gray-300"></div>
                     </div>
                     
-                    {/* Bouton ajout manuel */}
                     <button
                       onClick={() => setShowAddManual(true)}
                       className="w-full bg-purple-100 text-purple-700 px-6 py-3 rounded-lg font-semibold hover:bg-purple-200 transition-all border-2 border-purple-300"
@@ -786,6 +635,8 @@ const App = () => {
                       <UserPlus className="inline mr-2" size={20} />
                       Ajouter sans QR code
                     </button>
+                    
+                    <div id={qrCodeRegionId} className="hidden"></div>
                   </div>
 
                   {showAddManual && (
@@ -813,37 +664,6 @@ const App = () => {
                             </label>
                             <input
                               type="email"
-                              value={manualEmail}
-                              onChange={(e) => setManualEmail(e.target.value)}
-                              placeholder="Ex: jean.dupont@email.com"
-                              className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:border-indigo-500 focus:outline-none"
-                            />
-                          </div>
-                        </div>
-
-                        <div className="flex gap-3 mt-6">
-                          <button
-                            onClick={() => {
-                              setShowAddManual(false);
-                              setManualName('');
-                              setManualEmail('');
-                            }}
-                            className="flex-1 px-4 py-3 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-all font-semibold"
-                          >
-                            Annuler
-                          </button>
-                          <button
-                            onClick={addManualParticipant}
-                            className="flex-1 px-4 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-all font-semibold"
-                          >
-                            Ajouter
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
                               value={manualEmail}
                               onChange={(e) => setManualEmail(e.target.value)}
                               placeholder="Ex: jean.dupont@email.com"
