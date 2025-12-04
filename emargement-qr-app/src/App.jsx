@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Camera, Upload, Download, CheckCircle, XCircle, Users, FileSpreadsheet, X, Search, Calendar, ArrowLeft, Plus } from 'lucide-react';
+import { Camera, Upload, Download, CheckCircle, XCircle, Users, FileSpreadsheet, X, Search, Calendar, ArrowLeft, Plus, UserPlus } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
 const App = () => {
@@ -14,10 +14,70 @@ const App = () => {
   const [filterStatus, setFilterStatus] = useState('all');
   const [newEventName, setNewEventName] = useState('');
   const [newEventDate, setNewEventDate] = useState('');
+  const [showAddManual, setShowAddManual] = useState(false);
+  const [manualName, setManualName] = useState('');
+  const [manualEmail, setManualEmail] = useState('');
   const videoRef = useRef(null);
   const streamRef = useRef(null);
   const fileInputRef = useRef(null);
+  const canvasRef = useRef(null);
   const scanIntervalRef = useRef(null);
+
+  // Charger les événements depuis localStorage au démarrage
+  useEffect(() => {
+    const savedEvents = localStorage.getItem('emargement-events');
+    if (savedEvents) {
+      try {
+        setEvents(JSON.parse(savedEvents));
+      } catch (e) {
+        console.error('Erreur chargement événements:', e);
+      }
+    }
+  }, []);
+
+  // Sauvegarder les événements dans localStorage à chaque modification
+  useEffect(() => {
+    if (events.length > 0) {
+      localStorage.setItem('emargement-events', JSON.stringify(events));
+    }
+  }, [events]);
+
+  // Sons de validation et erreur
+  const playSuccessSound = () => {
+    const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    const oscillator = audioContext.createOscillator();
+    const gainNode = audioContext.createGain();
+    
+    oscillator.connect(gainNode);
+    gainNode.connect(audioContext.destination);
+    
+    oscillator.frequency.value = 800;
+    oscillator.type = 'sine';
+    
+    gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+    gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.3);
+    
+    oscillator.start(audioContext.currentTime);
+    oscillator.stop(audioContext.currentTime + 0.3);
+  };
+
+  const playErrorSound = () => {
+    const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    const oscillator = audioContext.createOscillator();
+    const gainNode = audioContext.createGain();
+    
+    oscillator.connect(gainNode);
+    gainNode.connect(audioContext.destination);
+    
+    oscillator.frequency.value = 200;
+    oscillator.type = 'sawtooth';
+    
+    gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+    gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.5);
+    
+    oscillator.start(audioContext.currentTime);
+    oscillator.stop(audioContext.currentTime + 0.5);
+  };
 
   const handleFileUpload = (e) => {
     const file = e.target.files[0];
@@ -103,15 +163,14 @@ const App = () => {
         videoRef.current.srcObject = stream;
         streamRef.current = stream;
         
-        videoRef.current.onloadedmetadata = () => {
-          videoRef.current.play();
-          setScanning(true);
-          startQRScanning();
-        };
+        await videoRef.current.play();
+        setScanning(true);
+        startQRScanning();
       }
     } catch (err) {
       console.error('Erreur caméra:', err);
       setMessage('❌ Erreur: Impossible d\'accéder à la caméra. Autorisez l\'accès dans les paramètres.');
+      playErrorSound();
     }
   };
 
@@ -134,12 +193,10 @@ const App = () => {
   };
 
   const startQRScanning = () => {
-    // Simulation de scan pour la démo
-    // En production, intégrez une bibliothèque comme html5-qrcode
+    // Simulation de scan pour la démo - Dans une vraie app, utilisez html5-qrcode
     scanIntervalRef.current = setInterval(() => {
       const notPresent = participants.filter(p => !p.present);
       
-      // Simulation: 5% de chance de scanner quelqu'un
       if (notPresent.length > 0 && Math.random() > 0.95) {
         const randomParticipant = notPresent[Math.floor(Math.random() * notPresent.length)];
         handleScanSuccess(randomParticipant.id);
@@ -151,13 +208,15 @@ const App = () => {
     const participant = participants.find(p => p.id === scannedId);
     
     if (!participant) {
-      setMessage('❌ Participant non trouvé dans la liste');
+      setMessage('❌ Code QR non reconnu - Participant introuvable');
+      playErrorSound();
       setTimeout(() => setMessage(''), 3000);
       return;
     }
 
     if (participant.present) {
-      setMessage(`⚠️ ${participant.name} est déjà enregistré comme présent`);
+      setMessage(`⚠️ ${participant.name} a déjà été scanné !`);
+      playErrorSound();
       setTimeout(() => setMessage(''), 3000);
       return;
     }
@@ -176,7 +235,8 @@ const App = () => {
         : ev
     ));
 
-    setMessage(`✅ ${participant.name} marqué présent`);
+    setMessage(`✅ ${participant.name} enregistré avec succès !`);
+    playSuccessSound();
     
     if (navigator.vibrate) {
       navigator.vibrate(200);
@@ -203,6 +263,41 @@ const App = () => {
         ? { ...ev, participants: updatedParticipants }
         : ev
     ));
+  };
+
+  const addManualParticipant = () => {
+    if (!manualName.trim()) {
+      setMessage('❌ Veuillez renseigner au moins le nom');
+      return;
+    }
+
+    const newParticipant = {
+      id: 'MANUAL_' + Date.now(),
+      name: manualName.trim(),
+      email: manualEmail.trim() || 'Non renseigné',
+      guest: 'Non',
+      status: 'Ajouté manuellement',
+      manager: 'N/A',
+      present: true,
+      scannedAt: new Date().toLocaleString('fr-FR')
+    };
+
+    const updatedParticipants = [...participants, newParticipant];
+    setParticipants(updatedParticipants);
+    
+    setEvents(prev => prev.map(ev => 
+      ev.id === selectedEvent.id 
+        ? { ...ev, participants: updatedParticipants }
+        : ev
+    ));
+
+    setMessage(`✅ ${manualName} ajouté avec succès !`);
+    playSuccessSound();
+    setManualName('');
+    setManualEmail('');
+    setShowAddManual(false);
+    
+    setTimeout(() => setMessage(''), 3000);
   };
 
   const exportToExcel = () => {
@@ -284,7 +379,7 @@ const App = () => {
               <h1 className="text-3xl font-bold text-indigo-900 mb-2">
                 📋 Émargement Événements
               </h1>
-              <p className="text-gray-600">Gestion multi-événements hors ligne</p>
+              <p className="text-gray-600">Gestion multi-événements avec persistance</p>
             </div>
             {view === 'event-detail' && (
               <button
@@ -304,12 +399,12 @@ const App = () => {
         </div>
 
         {message && (
-          <div className={`mb-6 p-4 rounded-lg ${
+          <div className={`mb-6 p-4 rounded-lg animate-pulse ${
             message.includes('✅') ? 'bg-green-50 text-green-800 border-2 border-green-200' : 
-            message.includes('❌') ? 'bg-red-50 text-red-800 border-2 border-red-200' :
+            message.includes('❌') || message.includes('⚠️') ? 'bg-red-50 text-red-800 border-2 border-red-200' :
             'bg-yellow-50 text-yellow-800 border-2 border-yellow-200'
           }`}>
-            <p className="font-semibold">{message}</p>
+            <p className="font-semibold text-lg">{message}</p>
           </div>
         )}
 
@@ -543,14 +638,25 @@ const App = () => {
                     <div className="text-center">
                       <div className="bg-gray-100 rounded-lg p-12 mb-4">
                         <Camera size={64} className="mx-auto text-gray-400 mb-4" />
-                        <p className="text-gray-600">Positionnez le QR code devant la caméra</p>
+                        <p className="text-gray-600 mb-4">Positionnez le QR code devant la caméra</p>
                       </div>
                       <button
                         onClick={startCamera}
-                        className="bg-indigo-600 text-white px-8 py-3 rounded-lg font-semibold hover:bg-indigo-700 transition-all"
+                        className="bg-indigo-600 text-white px-8 py-3 rounded-lg font-semibold hover:bg-indigo-700 transition-all mb-4"
                       >
+                        <Camera className="inline mr-2" size={20} />
                         Démarrer le scanner
                       </button>
+                      
+                      <div className="mt-6 pt-6 border-t-2">
+                        <button
+                          onClick={() => setShowAddManual(true)}
+                          className="w-full bg-purple-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-purple-700 transition-all"
+                        >
+                          <UserPlus className="inline mr-2" size={20} />
+                          Ajouter un participant manuellement
+                        </button>
+                      </div>
                     </div>
                   ) : (
                     <div>
@@ -562,8 +668,9 @@ const App = () => {
                           muted
                           className="w-full h-96 object-cover"
                         />
-                        <div className="absolute inset-0 flex items-center justify-center">
-                          <div className="w-64 h-64 border-4 border-indigo-500 rounded-lg"></div>
+                        <canvas ref={canvasRef} className="hidden" />
+                        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                          <div className="w-64 h-64 border-4 border-indigo-500 rounded-lg shadow-lg"></div>
                         </div>
                       </div>
                       <button
@@ -572,8 +679,63 @@ const App = () => {
                       >
                         Arrêter le scanner
                       </button>
-                      <div className="mt-4 bg-yellow-50 rounded-lg p-3 text-center text-yellow-800 text-sm">
-                        <p>🎥 Scanner actif - Mode démo (simule les scans)</p>
+                      <div className="mt-4 bg-indigo-50 rounded-lg p-3 text-center text-indigo-800 text-sm">
+                        <p>🎥 Caméra active - Présentez le code QR</p>
+                      </div>
+                    </div>
+                  )}
+
+                  {showAddManual && (
+                    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+                      <div className="bg-white rounded-lg p-6 max-w-md w-full">
+                        <h3 className="text-xl font-bold text-gray-800 mb-4">Ajouter un participant</h3>
+                        
+                        <div className="space-y-4">
+                          <div>
+                            <label className="block text-sm font-semibold text-gray-700 mb-2">
+                              Nom complet *
+                            </label>
+                            <input
+                              type="text"
+                              value={manualName}
+                              onChange={(e) => setManualName(e.target.value)}
+                              placeholder="Ex: Jean Dupont"
+                              className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:border-indigo-500 focus:outline-none"
+                            />
+                          </div>
+                          
+                          <div>
+                            <label className="block text-sm font-semibold text-gray-700 mb-2">
+                              Email (optionnel)
+                            </label>
+                            <input
+                              type="email"
+                              value={manualEmail}
+                              onChange={(e) => setManualEmail(e.target.value)}
+                              placeholder="Ex: jean.dupont@email.com"
+                              className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:border-indigo-500 focus:outline-none"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="flex gap-3 mt-6">
+                          <button
+                            onClick={() => {
+                              setShowAddManual(false);
+                              setManualName('');
+                              setManualEmail('');
+                            }}
+                            className="flex-1 px-4 py-3 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-all font-semibold"
+                          >
+                            Annuler
+                          </button>
+                          <button
+                            onClick={addManualParticipant}
+                            className="flex-1 px-4 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-all font-semibold"
+                          >
+                            Ajouter
+                          </button>
+                        </div>
                       </div>
                     </div>
                   )}
@@ -582,9 +744,18 @@ const App = () => {
 
               {mode === 'list' && (
                 <div>
-                  <h3 className="text-xl font-bold text-gray-800 mb-4">
-                    Liste des participants
-                  </h3>
+                  <div className="flex justify-between items-center mb-4">
+                    <h3 className="text-xl font-bold text-gray-800">
+                      Liste des participants
+                    </h3>
+                    <button
+                      onClick={() => setShowAddManual(true)}
+                      className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-all text-sm font-semibold"
+                    >
+                      <UserPlus size={16} />
+                      Ajouter
+                    </button>
+                  </div>
 
                   <div className="mb-4 space-y-3">
                     <div className="relative">
@@ -632,48 +803,111 @@ const App = () => {
                     </div>
                   </div>
 
-                  <div className="space-y-2 max-h-[600px] overflow-y-auto">
-                    {filteredParticipants.map((participant) => (
-                      <div
-                        key={participant.id}
-                        className={`p-4 rounded-lg border-2 ${
-                          participant.present
-                            ? 'bg-green-50 border-green-300'
-                            : 'bg-white border-gray-200'
-                        }`}
-                      >
-                        <div className="flex items-start justify-between">
-                          <div className="flex-1">
-                            <div className="flex items-center gap-2 mb-1">
-                              {participant.present ? (
-                                <CheckCircle className="text-green-600" size={20} />
-                              ) : (
-                                <XCircle className="text-gray-400" size={20} />
+                  {filteredParticipants.length === 0 ? (
+                    <div className="text-center py-12 text-gray-500">
+                      <p>Aucun résultat</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-2 max-h-[600px] overflow-y-auto">
+                      {filteredParticipants.map((participant) => (
+                        <div
+                          key={participant.id}
+                          className={`p-4 rounded-lg border-2 transition-all ${
+                            participant.present
+                              ? 'bg-green-50 border-green-300'
+                              : 'bg-white border-gray-200'
+                          }`}
+                        >
+                          <div className="flex items-start justify-between">
+                            <div className="flex-1">
+                              <div className="flex items-center gap-2 mb-2">
+                                {participant.present ? (
+                                  <CheckCircle className="text-green-600 flex-shrink-0" size={20} />
+                                ) : (
+                                  <XCircle className="text-gray-400 flex-shrink-0" size={20} />
+                                )}
+                                <p className="font-bold text-gray-900 text-lg">{participant.name}</p>
+                              </div>
+                              <p className="text-sm text-gray-600 italic ml-7">{participant.email}</p>
+                              {participant.manager && participant.manager !== 'N/A' && (
+                                <p className="text-sm text-gray-600 ml-7 mt-1">👤 Gérant: {participant.manager}</p>
                               )}
-                              <p className="font-bold text-gray-800">{participant.name}</p>
+                              {participant.scannedAt && (
+                                <p className="text-xs text-green-700 ml-7 mt-2 font-semibold">
+                                  ✓ Arrivée: {participant.scannedAt}
+                                </p>
+                              )}
                             </div>
-                            <p className="text-sm text-gray-600 ml-7">📧 {participant.email}</p>
-                            <p className="text-sm text-gray-600 ml-7">👤 {participant.manager}</p>
-                            {participant.scannedAt && (
-                              <p className="text-xs text-green-700 ml-7 mt-1">
-                                ✓ {participant.scannedAt}
-                              </p>
-                            )}
+                            <button
+                              onClick={() => togglePresence(participant.id)}
+                              className={`px-4 py-2 rounded-lg font-semibold text-sm transition-all ${
+                                participant.present
+                                  ? 'bg-red-100 text-red-700 hover:bg-red-200'
+                                  : 'bg-indigo-600 text-white hover:bg-indigo-700'
+                              }`}
+                            >
+                              {participant.present ? 'Retirer' : 'Marquer'}
+                            </button>
                           </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {showAddManual && (
+                    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+                      <div className="bg-white rounded-lg p-6 max-w-md w-full">
+                        <h3 className="text-xl font-bold text-gray-800 mb-4">Ajouter un participant</h3>
+                        
+                        <div className="space-y-4">
+                          <div>
+                            <label className="block text-sm font-semibold text-gray-700 mb-2">
+                              Nom complet *
+                            </label>
+                            <input
+                              type="text"
+                              value={manualName}
+                              onChange={(e) => setManualName(e.target.value)}
+                              placeholder="Ex: Jean Dupont"
+                              className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:border-indigo-500 focus:outline-none"
+                            />
+                          </div>
+                          
+                          <div>
+                            <label className="block text-sm font-semibold text-gray-700 mb-2">
+                              Email (optionnel)
+                            </label>
+                            <input
+                              type="email"
+                              value={manualEmail}
+                              onChange={(e) => setManualEmail(e.target.value)}
+                              placeholder="Ex: jean.dupont@email.com"
+                              className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:border-indigo-500 focus:outline-none"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="flex gap-3 mt-6">
                           <button
-                            onClick={() => togglePresence(participant.id)}
-                            className={`px-4 py-2 rounded-lg font-semibold text-sm ${
-                              participant.present
-                                ? 'bg-red-100 text-red-700'
-                                : 'bg-indigo-600 text-white'
-                            }`}
+                            onClick={() => {
+                              setShowAddManual(false);
+                              setManualName('');
+                              setManualEmail('');
+                            }}
+                            className="flex-1 px-4 py-3 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-all font-semibold"
                           >
-                            {participant.present ? 'Retirer' : 'Marquer'}
+                            Annuler
+                          </button>
+                          <button
+                            onClick={addManualParticipant}
+                            className="flex-1 px-4 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-all font-semibold"
+                          >
+                            Ajouter
                           </button>
                         </div>
                       </div>
-                    ))}
-                  </div>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
