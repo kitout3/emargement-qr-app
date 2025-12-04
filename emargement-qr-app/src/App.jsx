@@ -9,7 +9,6 @@ const App = () => {
   const [selectedEvent, setSelectedEvent] = useState(null);
   const [mode, setMode] = useState('list');
   const [participants, setParticipants] = useState([]);
-  const [scanning, setScanning] = useState(false);
   const [message, setMessage] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [filterStatus, setFilterStatus] = useState('all');
@@ -30,21 +29,20 @@ const App = () => {
     if (!file) return;
 
     try {
-      setMessage('📸 Analyse de l\'image...');
+      setMessage('📸 Analyse de la photo en cours...');
       
       if (!html5QrCodeRef.current) {
         html5QrCodeRef.current = new Html5Qrcode(qrCodeRegionId);
       }
 
       const result = await html5QrCodeRef.current.scanFile(file, false);
-      console.log('✅ QR trouvé dans l\'image:', result);
+      console.log('✅ QR trouvé:', result);
       handleScanSuccess(result);
-      setShowQRFileInput(false);
     } catch (err) {
       console.error('❌ Erreur scan image:', err);
-      setMessage('❌ Aucun QR code trouvé dans cette image. Réessayez avec une photo plus nette.');
+      setMessage('❌ Aucun QR code détecté dans cette photo.\n\nAssurez-vous que le QR code est bien visible et net.');
       playErrorSound();
-      setTimeout(() => setMessage(''), 3000);
+      setTimeout(() => setMessage(''), 4000);
     }
   };
 
@@ -464,11 +462,9 @@ const App = () => {
 
   useEffect(() => {
     return () => {
-      if (html5QrCodeRef.current && scanning) {
-        html5QrCodeRef.current.stop().catch(err => console.error(err));
-      }
+      // Cleanup si nécessaire
     };
-  }, [scanning]);
+  }, []);
 
   const presentCount = participants.filter(p => p.present).length;
   const totalCount = participants.length;
@@ -502,7 +498,6 @@ const App = () => {
             {view === 'event-detail' && (
               <button
                 onClick={() => {
-                  stopCamera();
                   setView('events');
                   setSelectedEvent(null);
                   setParticipants([]);
@@ -710,7 +705,6 @@ const App = () => {
             <div className="flex gap-3 mb-6">
               <button
                 onClick={() => {
-                  stopCamera();
                   setMode('scan');
                 }}
                 className={`flex-1 py-3 rounded-lg font-semibold transition-all ${
@@ -724,7 +718,6 @@ const App = () => {
               </button>
               <button
                 onClick={() => {
-                  stopCamera();
                   setMode('list');
                 }}
                 className={`flex-1 py-3 rounded-lg font-semibold transition-all ${
@@ -752,70 +745,48 @@ const App = () => {
                     Scanner un code QR
                   </h3>
                   
-                  {!scanning ? (
-                    <div className="text-center">
-                      <div className="bg-gray-100 rounded-lg p-12 mb-4">
-                        <Camera size={64} className="mx-auto text-gray-400 mb-4" />
-                        <p className="text-gray-600 mb-4">Scannez un code QR</p>
-                        <p className="text-sm text-gray-500">Choisissez une méthode ci-dessous</p>
-                      </div>
-                      
-                      {/* Bouton Scanner avec caméra */}
-                      <button
-                        onClick={startCamera}
-                        className="w-full bg-indigo-600 text-white px-8 py-4 rounded-lg font-semibold hover:bg-indigo-700 transition-all mb-3"
-                      >
-                        <Camera className="inline mr-2" size={20} />
-                        Scanner avec la caméra
-                      </button>
-                      
-                      {/* Bouton Photo (solution de secours pour Safari) */}
-                      <div className="mb-4">
-                        <input
-                          ref={qrFileInputRef}
-                          type="file"
-                          accept="image/*"
-                          capture="environment"
-                          onChange={handleQRImageUpload}
-                          className="hidden"
-                        />
-                        <button
-                          onClick={() => qrFileInputRef.current?.click()}
-                          className="w-full bg-purple-600 text-white px-8 py-4 rounded-lg font-semibold hover:bg-purple-700 transition-all"
-                        >
-                          📸 Prendre une photo du QR
-                        </button>
-                        <p className="text-xs text-gray-500 mt-2">Recommandé pour iPhone</p>
-                      </div>
-                      
-                      <div className="pt-6 border-t-2">
-                        <button
-                          onClick={() => setShowAddManual(true)}
-                          className="w-full bg-gray-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-gray-700 transition-all"
-                        >
-                          <UserPlus className="inline mr-2" size={20} />
-                          Ajouter manuellement (sans QR)
-                        </button>
-                      </div>
+                  <div className="text-center">
+                    <div className="bg-gradient-to-br from-indigo-50 to-purple-50 rounded-lg p-12 mb-6">
+                      <Camera size={80} className="mx-auto text-indigo-600 mb-4" />
+                      <p className="text-gray-700 text-lg font-semibold mb-2">Scannez un code QR</p>
+                      <p className="text-sm text-gray-600">Prenez une photo du code QR pour enregistrer la présence</p>
                     </div>
-                  ) : (
-                    <div>
-                      <div className="bg-gray-900 rounded-lg overflow-hidden mb-4">
-                        <div id={qrCodeRegionId} style={{ width: '100%' }}></div>
-                      </div>
-                      <button
-                        onClick={stopCamera}
-                        className="w-full bg-red-600 text-white px-8 py-3 rounded-lg font-semibold hover:bg-red-700 transition-all"
-                      >
-                        Arrêter le scanner
-                      </button>
-                      <div className="mt-4 bg-indigo-50 rounded-lg p-4 text-center">
-                        <p className="text-indigo-800 font-semibold mb-2">🎥 Scanner actif</p>
-                        <p className="text-sm text-indigo-700">Placez le QR code dans le carré de scan</p>
-                        <p className="text-xs text-gray-600 mt-2">Maintenez le QR à 15-20cm de la caméra</p>
-                      </div>
+                    
+                    {/* BOUTON PRINCIPAL - Prendre photo et scanner */}
+                    <input
+                      ref={qrFileInputRef}
+                      type="file"
+                      accept="image/*"
+                      capture="environment"
+                      onChange={handleQRImageUpload}
+                      className="hidden"
+                    />
+                    <button
+                      onClick={() => qrFileInputRef.current?.click()}
+                      className="w-full bg-indigo-600 text-white px-8 py-5 rounded-xl font-bold text-lg hover:bg-indigo-700 transition-all shadow-lg mb-4"
+                    >
+                      <Camera className="inline mr-3" size={28} />
+                      📸 Scanner le code QR
+                    </button>
+                    
+                    <p className="text-sm text-gray-500 mb-6">Votre appareil photo va s'ouvrir automatiquement</p>
+                    
+                    {/* Séparateur */}
+                    <div className="flex items-center gap-4 mb-6">
+                      <div className="flex-1 border-t border-gray-300"></div>
+                      <span className="text-gray-500 text-sm">ou</span>
+                      <div className="flex-1 border-t border-gray-300"></div>
                     </div>
-                  )}
+                    
+                    {/* Bouton ajout manuel */}
+                    <button
+                      onClick={() => setShowAddManual(true)}
+                      className="w-full bg-purple-100 text-purple-700 px-6 py-3 rounded-lg font-semibold hover:bg-purple-200 transition-all border-2 border-purple-300"
+                    >
+                      <UserPlus className="inline mr-2" size={20} />
+                      Ajouter sans QR code
+                    </button>
+                  </div>
 
                   {showAddManual && (
                     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
@@ -842,6 +813,37 @@ const App = () => {
                             </label>
                             <input
                               type="email"
+                              value={manualEmail}
+                              onChange={(e) => setManualEmail(e.target.value)}
+                              placeholder="Ex: jean.dupont@email.com"
+                              className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:border-indigo-500 focus:outline-none"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="flex gap-3 mt-6">
+                          <button
+                            onClick={() => {
+                              setShowAddManual(false);
+                              setManualName('');
+                              setManualEmail('');
+                            }}
+                            className="flex-1 px-4 py-3 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-all font-semibold"
+                          >
+                            Annuler
+                          </button>
+                          <button
+                            onClick={addManualParticipant}
+                            className="flex-1 px-4 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-all font-semibold"
+                          >
+                            Ajouter
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
                               value={manualEmail}
                               onChange={(e) => setManualEmail(e.target.value)}
                               placeholder="Ex: jean.dupont@email.com"
