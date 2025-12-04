@@ -18,9 +18,35 @@ const App = () => {
   const [showAddManual, setShowAddManual] = useState(false);
   const [manualName, setManualName] = useState('');
   const [manualEmail, setManualEmail] = useState('');
+  const [showQRFileInput, setShowQRFileInput] = useState(false);
   const fileInputRef = useRef(null);
+  const qrFileInputRef = useRef(null);
   const html5QrCodeRef = useRef(null);
   const qrCodeRegionId = "qr-reader";
+
+  // Scanner un QR depuis une photo
+  const handleQRImageUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    try {
+      setMessage('📸 Analyse de l\'image...');
+      
+      if (!html5QrCodeRef.current) {
+        html5QrCodeRef.current = new Html5Qrcode(qrCodeRegionId);
+      }
+
+      const result = await html5QrCodeRef.current.scanFile(file, false);
+      console.log('✅ QR trouvé dans l\'image:', result);
+      handleScanSuccess(result);
+      setShowQRFileInput(false);
+    } catch (err) {
+      console.error('❌ Erreur scan image:', err);
+      setMessage('❌ Aucun QR code trouvé dans cette image. Réessayez avec une photo plus nette.');
+      playErrorSound();
+      setTimeout(() => setMessage(''), 3000);
+    }
+  };
 
   // Charger les événements depuis localStorage au démarrage
   useEffect(() => {
@@ -148,7 +174,18 @@ const App = () => {
 
   const startCamera = async () => {
     try {
-      setMessage('🎥 Chargement de la caméra...');
+      setMessage('🎥 Initialisation de la caméra...');
+      
+      // Attendre que le DOM soit prêt
+      await new Promise(resolve => setTimeout(resolve, 200));
+      
+      // Vérifier si l'élément existe
+      const readerElement = document.getElementById(qrCodeRegionId);
+      if (!readerElement) {
+        throw new Error('Élément scanner non trouvé. Réessayez.');
+      }
+      
+      setScanning(true);
       
       if (!html5QrCodeRef.current) {
         html5QrCodeRef.current = new Html5Qrcode(qrCodeRegionId);
@@ -158,40 +195,110 @@ const App = () => {
         fps: 10,
         qrbox: { width: 250, height: 250 },
         aspectRatio: 1.0,
-        rememberLastUsedCamera: true
+        disableFlip: false
       };
 
-      // Essayer d'abord la caméra arrière
-      const cameras = await Html5Qrcode.getCameras();
-      console.log('Caméras disponibles:', cameras);
+      // Pour Safari iOS : Méthode simple et directe
+      const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
       
-      let cameraId = { facingMode: "environment" };
-      
-      // Si des caméras sont trouvées, utiliser la dernière (généralement caméra arrière)
-      if (cameras && cameras.length > 0) {
-        cameraId = cameras[cameras.length - 1].id;
+      if (isSafari) {
+        console.log('📱 Safari détecté - Utilisation méthode iOS');
+        
+        try {
+          // Sur Safari iOS, utiliser la méthode la plus simple
+          await html5QrCodeRef.current.start(
+            { facingMode: "environment" },
+            config,
+            (decodedText) => {
+              console.log('✅ QR détecté:', decodedText);
+              handleScanSuccess(decodedText);
+            }
+          );
+          
+          setMessage('');
+          console.log('✅ Scanner Safari démarré');
+          return;
+        } catch (safariError) {
+          console.warn('⚠️ Tentative Safari échouée:', safariError);
+          // Continuer avec les autres méthodes
+        }
       }
 
-      await html5QrCodeRef.current.start(
-        cameraId,
-        config,
-        (decodedText) => {
-          console.log('QR détecté:', decodedText);
-          handleScanSuccess(decodedText);
-        },
-        (errorMessage) => {
-          // Erreur normale pendant le scan, on ne fait rien
+      // Méthodes pour autres navigateurs ou fallback Safari
+      try {
+        const cameras = await Html5Qrcode.getCameras();
+        console.log('✅ Caméras trouvées:', cameras);
+        
+        if (cameras && cameras.length > 0) {
+          let backCamera = cameras.find(cam => 
+            cam.label.toLowerCase().includes('back') || 
+            cam.label.toLowerCase().includes('rear') ||
+            cam.label.toLowerCase().includes('arrière')
+          );
+          
+          if (!backCamera && cameras.length > 1) {
+            backCamera = cameras[cameras.length - 1];
+          }
+          
+          const cameraToUse = backCamera || cameras[0];
+          console.log('📷 Utilisation de:', cameraToUse.label);
+          
+          await html5QrCodeRef.current.start(
+            cameraToUse.id,
+            config,
+            (decodedText) => {
+              console.log('✅ QR détecté:', decodedText);
+              handleScanSuccess(decodedText);
+            }
+          );
+          
+          setMessage('');
+          console.log('✅ Scanner démarré avec ID caméra');
+          return;
         }
-      );
+      } catch (err) {
+        console.warn('⚠️ Méthode avec ID échouée:', err);
+      }
 
-      setScanning(true);
-      setMessage('');
-      console.log('Scanner démarré avec succès');
+      // Fallback final : n'importe quelle caméra
+      try {
+        await html5QrCodeRef.current.start(
+          { facingMode: "user" },
+          config,
+          (decodedText) => {
+            console.log('✅ QR détecté:', decodedText);
+            handleScanSuccess(decodedText);
+          }
+        );
+        
+        setMessage('');
+        console.log('✅ Scanner démarré (caméra frontale)');
+      } catch (finalError) {
+        throw finalError;
+      }
+      
     } catch (err) {
-      console.error('Erreur complète caméra:', err);
-      setMessage(`❌ Erreur caméra: ${err.message || 'Impossible d\'accéder à la caméra'}. Vérifiez les autorisations.`);
-      playErrorSound();
+      console.error('❌ Erreur complète:', err);
       setScanning(false);
+      
+      let errorMsg = '';
+      
+      if (err.name === 'NotAllowedError') {
+        errorMsg = '🚫 Accès caméra refusé.\n\n1. Allez dans Réglages iPhone\n2. Safari → Caméra\n3. Autorisez l\'accès';
+      } else if (err.name === 'NotFoundError') {
+        errorMsg = '📷 Aucune caméra trouvée sur cet appareil.';
+      } else if (err.name === 'NotReadableError') {
+        errorMsg = '⚠️ Caméra déjà utilisée.\n\nFermez les autres apps et réessayez.';
+      } else if (err.name === 'OverconstrainedError') {
+        errorMsg = '⚠️ Configuration caméra invalide.\n\nVotre appareil ne supporte pas cette caméra.';
+      } else if (err.message && err.message.includes('scanner non trouvé')) {
+        errorMsg = '⚠️ Erreur de chargement.\n\nRevenez en arrière et réessayez.';
+      } else {
+        errorMsg = `❌ Erreur: ${err.message || 'Erreur inconnue'}\n\nRéessayez ou contactez le support.`;
+      }
+      
+      setMessage(errorMsg);
+      playErrorSound();
     }
   };
 
@@ -649,24 +756,45 @@ const App = () => {
                     <div className="text-center">
                       <div className="bg-gray-100 rounded-lg p-12 mb-4">
                         <Camera size={64} className="mx-auto text-gray-400 mb-4" />
-                        <p className="text-gray-600 mb-4">Positionnez le QR code devant la caméra</p>
-                        <p className="text-sm text-gray-500">Le scan se fait automatiquement</p>
+                        <p className="text-gray-600 mb-4">Scannez un code QR</p>
+                        <p className="text-sm text-gray-500">Choisissez une méthode ci-dessous</p>
                       </div>
+                      
+                      {/* Bouton Scanner avec caméra */}
                       <button
                         onClick={startCamera}
-                        className="bg-indigo-600 text-white px-8 py-3 rounded-lg font-semibold hover:bg-indigo-700 transition-all mb-4"
+                        className="w-full bg-indigo-600 text-white px-8 py-4 rounded-lg font-semibold hover:bg-indigo-700 transition-all mb-3"
                       >
                         <Camera className="inline mr-2" size={20} />
-                        Démarrer le scanner
+                        Scanner avec la caméra
                       </button>
                       
-                      <div className="mt-6 pt-6 border-t-2">
+                      {/* Bouton Photo (solution de secours pour Safari) */}
+                      <div className="mb-4">
+                        <input
+                          ref={qrFileInputRef}
+                          type="file"
+                          accept="image/*"
+                          capture="environment"
+                          onChange={handleQRImageUpload}
+                          className="hidden"
+                        />
+                        <button
+                          onClick={() => qrFileInputRef.current?.click()}
+                          className="w-full bg-purple-600 text-white px-8 py-4 rounded-lg font-semibold hover:bg-purple-700 transition-all"
+                        >
+                          📸 Prendre une photo du QR
+                        </button>
+                        <p className="text-xs text-gray-500 mt-2">Recommandé pour iPhone</p>
+                      </div>
+                      
+                      <div className="pt-6 border-t-2">
                         <button
                           onClick={() => setShowAddManual(true)}
-                          className="w-full bg-purple-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-purple-700 transition-all"
+                          className="w-full bg-gray-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-gray-700 transition-all"
                         >
                           <UserPlus className="inline mr-2" size={20} />
-                          Ajouter un participant manuellement
+                          Ajouter manuellement (sans QR)
                         </button>
                       </div>
                     </div>
